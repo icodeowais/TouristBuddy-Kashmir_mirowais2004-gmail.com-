@@ -1,0 +1,378 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>TouristBuddy Kashmir</title>
+
+  <!-- Leaflet CSS -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+
+  <style>
+    /* Layout */
+    html, body { height: 100%; margin: 0; font-family: Arial, Helvetica, sans-serif; }
+    body { display: flex; height: 100vh; overflow: hidden; }
+
+    /* Sidebar */
+    #sidebar {
+      width: 320px;
+      min-width: 260px;
+      max-width: 380px;
+      padding: 14px;
+      box-sizing: border-box;
+      background: #f7f9fb;
+      border-right: 1px solid #e0e6ea;
+      overflow-y: auto;
+    }
+    #sidebar h1 { margin: 0 0 8px 0; font-size: 20px; }
+    #sidebar p { margin: 0 0 12px 0; color: #555; font-size: 13px; }
+
+    /* Search */
+    #search { width: 100%; padding: 8px; margin-bottom: 12px; border-radius: 6px; border: 1px solid #d0d7dd; box-sizing: border-box; }
+
+    /* Destination cards */
+    .destination { background: #fff; border-radius: 8px; padding: 10px; box-shadow: 0 1px 4px rgba(20,30,40,0.04); margin-bottom: 12px; }
+    .destination img { width: 100%; height: 150px; object-fit: cover; border-radius: 6px; display: block; margin-bottom: 8px; }
+    .destination h4 { margin: 0 0 6px 0; font-size: 15px; }
+    .destination p { margin: 0 0 8px 0; font-size: 13px; color: #555; }
+
+    .btn-row { display:flex; gap:8px; flex-wrap:wrap; }
+    .btn {
+      padding: 7px 10px;
+      border-radius: 6px;
+      border: none;
+      cursor: pointer;
+      font-size: 13px;
+    }
+    .btn-primary { background: #1f72ff; color: white; }
+    .btn-secondary { background: #2ea04a; color: white; }
+    .btn-danger { background: #ff4d4f; color: white; }
+
+    /* Itinerary & weather panel */
+    #itinerary { margin-top: 8px; padding: 10px; background: #fff; border-radius: 8px; border: 1px solid #eef3f7; }
+    #itinerary h3 { margin: 0 0 8px 0; font-size: 15px; }
+    #itinerary-list { list-style: none; padding: 0; margin: 0 0 8px 0; max-height: 200px; overflow:auto; }
+    #itinerary-list li { display:flex; justify-content:space-between; align-items:center; padding:6px 4px; border-bottom:1px solid #f1f4f6; font-size:13px; }
+    #itinerary-list li button { margin-left:10px; }
+
+    #weather { margin-top: 12px; padding: 10px; background: #fff; border-radius: 8px; border: 1px solid #eef3f7; }
+    #weather h3 { margin: 0 0 8px 0; font-size: 15px; }
+    #weather-info { font-size: 13px; color: #333; }
+
+    /* Map area */
+    #map { flex: 1; min-height: 0; } /* min-height:0 works with flex children to avoid overflow issues */
+
+    /* Small screens */
+    @media (max-width: 720px) {
+      body { flex-direction: column; }
+      #sidebar { width: 100%; max-height: 45vh; overflow-y: auto; }
+      #map { height: 55vh; }
+    }
+  </style>
+</head>
+<body>
+
+  <aside id="sidebar">
+    <h1>TouristBuddy Kashmir</h1>
+    <p>Explore Kashmir — search places, view on map, add to itinerary and see live weather.</p>
+
+    <input id="search" placeholder="Search destinations..." />
+
+    <div id="destinations"></div>
+
+    <div id="itinerary">
+      <h3>Your Itinerary</h3>
+      <ul id="itinerary-list"></ul>
+      <div style="display:flex; gap:8px; margin-top:8px;">
+        <button class="btn btn-primary" onclick="optimizeRoute()">Optimize Route</button>
+        <button class="btn btn-danger" onclick="clearItinerary()">Clear</button>
+      </div>
+    </div>
+
+    <div id="weather" style="margin-top:12px;">
+      <h3>Weather</h3>
+      <div id="weather-info">Click any place (marker or View) to load weather.</div>
+    </div>
+  </aside>
+
+  <div id="map"></div>
+
+  <!-- Leaflet JS -->
+  <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+
+  <script>
+    /***** CONFIG: your OpenWeather API key (you gave this) *****/
+    const OPENWEATHER_API_KEY = "d8a7c19cbbeeb02e55cba008f01d4ad1";
+
+    /***** DATA: Kashmir destinations (images are web-hosted) *****/
+    const destinations = [
+      {
+        id: "dal-lake",
+        name: "Dal Lake, Srinagar",
+        coords: [34.0837, 74.7973],
+        short: "Famous lake with Shikara rides and floating gardens.",
+        img: "https://upload.wikimedia.org/wikipedia/commons/0/03/Dal_Lake_Hazratbal_Srinagar.jpg"
+      },
+      {
+        id: "gulmarg",
+        name: "Gulmarg",
+        coords: [34.0484, 74.3805],
+        short: "Hill station & skiing; 'Meadow of Flowers'.",
+        img: "https://upload.wikimedia.org/wikipedia/commons/2/20/Gulmarg_Kashmir.jpg"
+      },
+      {
+        id: "pahalgam",
+        name: "Pahalgam",
+        coords: [34.0150, 75.3150],
+        short: "Lidder river valley, trekking base and scenic meadows.",
+        img: "https://upload.wikimedia.org/wikipedia/commons/6/65/Pahalgam_Valley_Kashmir.jpg"
+      },
+      {
+        id: "sonamarg",
+        name: "Sonamarg",
+        coords: [34.3030, 75.2930],
+        short: "Gateway to high-altitude treks & glacier views.",
+        img: "https://upload.wikimedia.org/wikipedia/commons/0/0d/Sonamarg_Valley.jpg"
+      },
+      {
+        id: "betaab",
+        name: "Betaab Valley",
+        coords: [34.0462, 75.3220],
+        short: "Scenic valley near Pahalgam, popular with film shoots.",
+        img: "https://upload.wikimedia.org/wikipedia/commons/1/12/Betaab_Valley.jpg"
+      },
+      {
+        id: "shankaracharya",
+        name: "Shankaracharya Temple",
+        coords: [34.0945, 74.8330],
+        short: "Ancient temple atop a ridge overlooking Srinagar.",
+        img: "https://upload.wikimedia.org/wikipedia/commons/7/7c/Shankaracharya_Temple.jpg"
+      },
+      {
+        id: "jama-masjid",
+        name: "Jama Masjid, Srinagar",
+        coords: [34.0863, 74.8075],
+        short: "Historic mosque in the old city.",
+        img: "https://upload.wikimedia.org/wikipedia/commons/e/e5/Jama_Masjid_Srinagar.jpg"
+      }
+    ];
+
+    /***** STATE *****/
+    let itinerary = []; // array of destination ids (unique)
+    let routeLayer = null; // polyline layer for optimized route
+
+    /***** MAP INIT *****/
+    const map = L.map('map', { zoomControl: true }).setView([34.0837, 74.7973], 10);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '© OpenStreetMap contributors'
+    }).addTo(map);
+
+    /***** RENDER DESTINATIONS (cards in sidebar) *****/
+    const destinationsDiv = document.getElementById('destinations');
+
+    function escapeHtml(s) {
+      return String(s).replace(/&/g, '&').replace(/</g, '<').replace(/>/g, '>').replace(/'/g,"'").replace(/\"/g,",");
+    }
+
+    function renderDestinations(list) {
+      destinationsDiv.innerHTML = '';
+      list.forEach(d => {
+        const card = document.createElement('div');
+        card.className = 'destination';
+        card.innerHTML = `
+          <img src="${escapeHtml(d.img)}" alt="${escapeHtml(d.name)}" loading="lazy" />
+          <h4>${escapeHtml(d.name)}</h4>
+          <p>${escapeHtml(d.short)}</p>
+          <div class="btn-row">
+            <button class="btn btn-primary" onclick="flyToDestinationById('${escapeHtml(d.id)}')">View on Map</button>
+            <button class="btn btn-secondary" onclick="addToItinerary('${escapeHtml(d.id)}')">Add to Itinerary</button>
+            <button class="btn" style="background:#6c757d;color:white;" onclick="openInGoogleMaps(${d.coords[0]}, ${d.coords[1]})">Open in Maps</button>
+          </div>
+        `;
+        destinationsDiv.appendChild(card);
+      });
+    }
+
+    // initial render
+    renderDestinations(destinations);
+
+    /***** MARKERS: add markers and popups (popups use id -> safe) *****/
+    destinations.forEach(d => {
+      const popupHtml = `<b>${escapeHtml(d.name)}</b><br><small>${escapeHtml(d.short)}</small><br><div style="margin-top:6px;"><button onclick="addToItinerary('${escapeHtml(d.id)}')" style="padding:6px 8px;border-radius:6px;background:#2ea04a;color:#fff;border:none;cursor:pointer;">Add to Itinerary</button></div>`;
+      const marker = L.marker(d.coords).addTo(map).bindPopup(popupHtml);
+      marker.on('click', () => {
+        // show weather when marker clicked
+        showWeatherForCoords(d.coords, d.name);
+      });
+    });
+
+    /***** HELPERS: open in google maps *****/
+    function openInGoogleMaps(lat, lng) {
+      const url = `https://www.google.com/maps/search/?api=1&query=${lat},${lng}`;
+      window.open(url, '_blank', 'noopener');
+    }
+
+    /***** FLY TO: by id (safe for filtered lists) *****/
+    function flyToDestinationById(id) {
+      const dest = destinations.find(x => x.id === id);
+      if (!dest) return;
+      map.flyTo(dest.coords, 13, { duration: 0.8 });
+      // open popup for marker: search for the marker at coords and open
+      // (we will create a temporary popup at the coords)
+      L.popup({ maxWidth: 260 })
+        .setLatLng(dest.coords)
+        .setContent(`<b>${escapeHtml(dest.name)}</b><br><small>${escapeHtml(dest.short)}</small>`)
+        .openOn(map);
+
+      showWeatherForCoords(dest.coords, dest.name);
+    }
+
+    /***** ITINERARY: add/remove/clear/render (use id for uniqueness) *****/
+    function addToItinerary(id) {
+      // prevent duplicates
+      if (itinerary.includes(id)) {
+        // flash small message (alert would be disruptive)
+        const el = document.getElementById('itinerary-list');
+        // simple visual feedback: briefly change background of list
+        el.style.transition = 'background-color 0.25s';
+        el.style.backgroundColor = '#fff3cd';
+        setTimeout(() => { el.style.backgroundColor = ''; }, 400);
+        return;
+      }
+      itinerary.push(id);
+      renderItinerary();
+    }
+
+    function removeFromItinerary(id) {
+      itinerary = itinerary.filter(x => x !== id);
+      renderItinerary();
+    }
+
+    function clearItinerary() {
+      itinerary = [];
+      // remove existing route layer if any
+      if (routeLayer) { map.removeLayer(routeLayer); routeLayer = null; }
+      renderItinerary();
+    }
+
+    function renderItinerary() {
+      const ul = document.getElementById('itinerary-list');
+      ul.innerHTML = '';
+      itinerary.forEach(id => {
+        const d = destinations.find(x => x.id === id);
+        if (!d) return;
+        const li = document.createElement('li');
+        li.innerHTML = `<span>${escapeHtml(d.name)}</span>`;
+        const rightWrap = document.createElement('div');
+        rightWrap.style.display = 'flex';
+        rightWrap.style.alignItems = 'center';
+
+        const viewBtn = document.createElement('button');
+        viewBtn.className = 'btn btn-primary';
+        viewBtn.style.fontSize = '12px';
+        viewBtn.style.marginRight = '6px';
+        viewBtn.textContent = 'View';
+        viewBtn.onclick = () => flyToDestinationById(d.id);
+
+        const removeBtn = document.createElement('button');
+        removeBtn.className = 'btn btn-danger';
+        removeBtn.style.fontSize = '12px';
+        removeBtn.textContent = 'Remove';
+        removeBtn.onclick = () => removeFromItinerary(d.id);
+
+        rightWrap.appendChild(viewBtn);
+        rightWrap.appendChild(removeBtn);
+        li.appendChild(rightWrap);
+
+        ul.appendChild(li);
+      });
+    }
+
+    /***** SEARCH: filter the card list (safe — does not use index mapping) *****/
+    document.getElementById('search').addEventListener('input', (e) => {
+      const q = (e.target.value || '').trim().toLowerCase();
+      if (!q) {
+        renderDestinations(destinations);
+        return;
+      }
+      const filtered = destinations.filter(d =>
+        d.name.toLowerCase().includes(q) || d.short.toLowerCase().includes(q)
+      );
+      renderDestinations(filtered);
+    });
+
+    /***** WEATHER: fetch and display weather for coords *****/
+    async function showWeatherForCoords(coords, name) {
+      const weatherInfo = document.getElementById('weather-info');
+      weatherInfo.textContent = 'Loading weather...';
+      try {
+        if (!OPENWEATHER_API_KEY || OPENWEATHER_API_KEY.trim() === '') {
+          weatherInfo.textContent = 'OpenWeather API key not set.';
+          return;
+        }
+
+        const [lat, lon] = coords;
+        const url = `https://api.openweathermap.org/data/2.5/weather?lat=${encodeURIComponent(lat)}&lon=${encodeURIComponent(lon)}&units=metric&appid=${OPENWEATHER_API_KEY}`;
+        const res = await fetch(url);
+        if (!res.ok) {
+          const txt = await res.text().catch(()=>res.statusText);
+          weatherInfo.textContent = `Weather fetch failed: ${res.status} ${txt}`;
+          return;
+        }
+
+        const data = await res.json();
+        if (!data || !data.main) {
+          weatherInfo.textContent = 'Weather data unavailable.';
+          return;
+        }
+
+        const temp = data.main.temp;
+        const desc = (data.weather && data.weather[0] && data.weather[0].description) ? data.weather[0].description : 'N/A';
+        const wind = (data.wind && data.wind.speed) ? `${data.wind.speed} m/s` : 'N/A';
+        const feels = data.main.feels_like ?? null;
+        let html = `<strong>${escapeHtml(name)}</strong><br>`;
+        html += `🌡 Temp: ${temp} °C`;
+        if (feels !== null) html += ` (feels ${feels} °C)`;
+        html += `<br>☁ ${escapeHtml(String(desc))}<br>💨 Wind: ${escapeHtml(String(wind))}`;
+        if (data.main.humidity !== undefined) html += `<br>💧 Humidity: ${data.main.humidity}%`;
+        weatherInfo.innerHTML = html;
+      } catch (err) {
+        console.error('Weather error', err);
+        document.getElementById('weather-info').textContent = 'Failed to load weather (see console).';
+      }
+    }
+
+    /***** ROUTE OPTIMIZATION (very simple): draws a straight-line route in itinerary order sorted by longitude
+         - This is a simple heuristic (not real TSP). For hackathon demo it's fine.
+         - We remove existing route layer if present.
+    *****/
+    function optimizeRoute() {
+      if (routeLayer) { map.removeLayer(routeLayer); routeLayer = null; }
+      if (itinerary.length < 2) {
+        alert('Add at least 2 places to optimize route.');
+        return;
+      }
+      // Get coords for itinerary items
+      const coords = itinerary
+        .map(id => destinations.find(d => d.id === id))
+        .filter(Boolean)
+        // trivial sort: by longitude (east->west). You can swap to lat for different heuristic.
+        .sort((a,b) => a.coords[1] - b.coords[1])
+        .map(d => d.coords);
+
+      routeLayer = L.polyline(coords, { color: 'red', weight: 4, opacity: 0.8 }).addTo(map);
+      map.fitBounds(routeLayer.getBounds(), { padding: [40,40] });
+    }
+
+    /***** INITIAL STATE: empty itinerary render *****/
+    renderItinerary();
+
+    /***** NOTES for you:
+         - Save this file as index.html and open using Live Server (VS Code extension) or any HTTP server.
+         - Live Server is recommended so fetch() works reliably in all browsers.
+         - The bundled OpenWeather API key is the one you provided. Watch the free-tier limits on OpenWeather (calls/minute and daily limits).
+         - If you want route optimization using driving distances, we can plug in an external routing API (Mapbox, OSRM, Google Directions). For hackathon demo, straight-line polyline is usually fine.
+    *****/
+  </script>
+</body>
+</html> 
